@@ -1,0 +1,192 @@
+openapi: 3.0.3
+info:
+  title: Task API
+  version: "1.0.0"
+  description: >
+    A small task-management API used as Redline's reference fixture. It has
+    just enough surface area (auth, CRUD, required fields, enums, multiple
+    status codes) to exercise every test category Redline generates, while
+    staying small enough to read end-to-end in a few minutes.
+servers:
+  - url: http://localhost:8000
+security:
+  - ApiKeyAuth: []
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness check
+      description: Unauthenticated health check used by the load balancer.
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: List tasks
+      description: Returns all tasks, optionally filtered by status.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, done]
+          description: Filter tasks by status.
+      responses:
+        "200":
+          description: A list of tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Task"
+        "401":
+          description: Missing or invalid API key
+    post:
+      operationId: createTask
+      summary: Create a task
+      description: Creates a new task with a title and an optional status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreate"
+            example:
+              title: Write the quarterly report
+              status: open
+      responses:
+        "201":
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          description: Missing required field
+        "422":
+          description: Invalid field value (e.g. unknown status)
+        "401":
+          description: Missing or invalid API key
+  /tasks/{task_id}:
+    get:
+      operationId: getTask
+      summary: Get a task by id
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+          description: The numeric id of the task.
+      responses:
+        "200":
+          description: The requested task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Task not found
+        "401":
+          description: Missing or invalid API key
+    put:
+      operationId: updateTask
+      summary: Update a task
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskUpdate"
+            example:
+              title: Write the quarterly report
+              status: done
+      responses:
+        "200":
+          description: Task updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Task not found
+        "422":
+          description: Invalid field value
+        "401":
+          description: Missing or invalid API key
+    delete:
+      operationId: deleteTask
+      summary: Delete a task
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        "204":
+          description: Task deleted
+        "404":
+          description: Task not found
+        "401":
+          description: Missing or invalid API key
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    Task:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        status:
+          type: string
+          enum: [open, done]
+      required: [id, title, status]
+    TaskCreate:
+      type: object
+      properties:
+        title:
+          type: string
+        status:
+          type: string
+          enum: [open, done]
+      required: [title]
+    TaskUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        status:
+          type: string
+          enum: [open, done]
+      required: [title, status]

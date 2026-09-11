@@ -1,0 +1,40 @@
+{
+  "test_cases": [
+    {
+      "test_id": "TC-001",
+      "endpoint": "/tasks/{task_id}",
+      "method": "GET",
+      "category": "not_found",
+      "name": "get missing task",
+      "purpose": "verify a nonexistent task id returns 404",
+      "preconditions": [],
+      "request": {
+        "path_params": {"task_id": "999999"},
+        "query_params": {},
+        "headers": {"X-API-Key": "AUTH_TOKEN_PLACEHOLDER"},
+        "body": null
+      },
+      "expected_status": 404,
+      "assertions": [{"type": "status_code", "expected": 404}],
+      "tags": []
+    },
+    {
+      "test_id": "TC-002",
+      "endpoint": "/tasks/{task_id}",
+      "method": "GET",
+      "category": "positive",
+      "name": "get existing task (missing path param)",
+      "purpose": "verify an existing task can be fetched by id",
+      "preconditions": [],
+      "request": {
+        "path_params": {},
+        "query_params": {},
+        "headers": {"X-API-Key": "AUTH_TOKEN_PLACEHOLDER"},
+        "body": null
+      },
+      "expected_status": 200,
+      "assertions": [{"type": "status_code", "expected": 200}],
+      "tags": []
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "test_cases": [
+    {
+      "test_id": "TC-001",
+      "endpoint": "/tasks/{task_id}",
+      "method": "GET",
+      "category": "positive",
+      "name": "get existing task",
+      "purpose": "verify an existing task can be fetched by id"
+    }
+  ]
+}

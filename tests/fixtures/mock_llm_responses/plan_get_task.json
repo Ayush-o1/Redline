@@ -1,0 +1,10 @@
+{
+  "endpoint": "/tasks/{task_id}",
+  "method": "GET",
+  "scenarios": [
+    "fetching an existing task returns 200 with the task body",
+    "fetching a task id that does not exist returns 404",
+    "request without a valid API key returns 401"
+  ],
+  "notes": ""
+}

@@ -1,0 +1,18 @@
+{
+  "test_id": "TC-001",
+  "endpoint": "/tasks/{task_id}",
+  "method": "GET",
+  "category": "positive",
+  "name": "get existing task",
+  "purpose": "verify an existing task can be fetched by id",
+  "preconditions": [],
+  "request": {
+    "path_params": {"task_id": "1"},
+    "query_params": {},
+    "headers": {"X-API-Key": "AUTH_TOKEN_PLACEHOLDER"},
+    "body": null
+  },
+  "expected_status": 200,
+  "assertions": [{"type": "status_code", "expected": 200}],
+  "tags": []
+}

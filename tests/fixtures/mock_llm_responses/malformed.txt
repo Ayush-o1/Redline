@@ -1,0 +1,7 @@
+Sure! Here are some test cases for this endpoint:
+
+```json
+{ "test_cases": [ { "test_id": "TC-001", "method": "GET"
+```
+
+Let me know if you'd like more.

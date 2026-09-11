@@ -1,0 +1,35 @@
+name: Integration (real LLM)
+
+# Manually-triggered only. Exercises the full pipeline against a real OpenAI
+# call and the bundled demo app. Requires an OPENAI_API_KEY repository
+# secret; unlike ci.yml, this workflow costs money to run and is never
+# triggered automatically on push or pull_request.
+on:
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -e ".[demo]"
+
+      - name: Run full pipeline against the demo app with a real LLM
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          redline full --spec examples/taskapi.yaml --demo-app --max-retries 2
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redline-reports
+          path: reports/

@@ -1,0 +1,42 @@
+openapi: 3.0.3
+info:
+  title: Mini Task API
+  version: "1.0.0"
+security:
+  - ApiKeyAuth: []
+paths:
+  /tasks/{task_id}:
+    get:
+      operationId: getTask
+      summary: Get a task by id
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        "200":
+          description: The requested task
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  title:
+                    type: string
+                  status:
+                    type: string
+        "404":
+          description: Task not found
+        "401":
+          description: Missing or invalid API key
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
