@@ -75,6 +75,33 @@ def test_full_pipeline_repairs_invalid_case_then_passes(tmp_path: Path):
     assert report.repair_attempts[0].outcome == "repaired"
 
 
+def test_full_pipeline_repairs_execution_failure_then_passes(tmp_path: Path):
+    # TC-001 is structurally valid (404 is a documented status for this endpoint,
+    # so it passes validation) but wrong: task_id=1 exists in the demo app, so the
+    # real response is 200, not 404. This exercises the *other* repair path --
+    # a case that fails at execution time, not validation time.
+    provider = MockProvider(
+        [
+            load_mock_response("plan_get_task"),
+            load_mock_response("testcase_wrong_status"),
+            load_mock_response("repaired_correct_status"),
+        ]
+    )
+    report = run_pipeline(
+        SINGLE_ENDPOINT_SPEC, _settings(tmp_path), provider,
+        output_dir=tmp_path / "reports", use_demo_app=True,
+    )
+
+    assert report.total_generated == 1
+    assert report.total_validated == 1  # nothing rejected by validation
+    assert report.total_executed == 1
+    assert report.total_passed == 1
+    assert report.total_failed == 0
+    assert report.final_status == "PASSED"
+    assert len(report.repair_attempts) == 1
+    assert report.repair_attempts[0].outcome == "repaired"
+
+
 def test_full_pipeline_gives_up_after_max_retries(tmp_path: Path):
     # The mock always returns the same broken case, no matter how many times we ask.
     provider = MockProvider(
