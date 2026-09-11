@@ -11,6 +11,8 @@ Design constraints (see docs/DECISIONS.md "limited retry loop"):
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import BaseModel
 
 from redline.generation.generator import GenerationError, repair_test_case
@@ -102,10 +104,19 @@ def repair_until_valid_or_exhausted(
     max_retries: int,
     provider: LLMProvider,
     api: ApiModel,
+    verify: Callable[[TestCase], tuple[bool, str | None]] | None = None,
 ) -> tuple[TestCase | None, list[RepairAttempt]]:
     """Run up to max_retries repair rounds, chaining each attempt's output into
     the next round's input. Returns the first accepted TestCase, or None if the
     retry budget was exhausted, plus the full history of attempts.
+
+    This one function backs both places Redline repairs a case:
+    - a case rejected by deterministic validation: `verify` is left as None, so
+      passing validation is enough to count as fixed.
+    - a case that passed validation but failed execution: the caller passes a
+      `verify` callback that re-runs the case against the target and reports
+      pass/fail, so a structurally-valid-but-still-failing fix keeps retrying
+      instead of being accepted early.
     """
     records: list[RepairAttempt] = []
     current_dict = failing_case.model_dump(mode="json")
@@ -114,10 +125,20 @@ def repair_until_valid_or_exhausted(
     for attempt_number in range(1, max_retries + 1):
         step = attempt_repair(endpoint, current_dict, current_error, attempt_number, provider, api)
         records.append(step.record)
-        if step.accepted and step.candidate is not None:
+
+        if not step.accepted or step.candidate is None:
+            if step.candidate is not None:
+                current_dict = step.candidate.model_dump(mode="json")
+            current_error = step.next_error or current_error
+            continue
+
+        if verify is None:
             return step.candidate, records
-        if step.candidate is not None:
-            current_dict = step.candidate.model_dump(mode="json")
-        current_error = step.next_error or current_error
+
+        passed, failure_message = verify(step.candidate)
+        if passed:
+            return step.candidate, records
+        current_dict = step.candidate.model_dump(mode="json")
+        current_error = failure_message or "test still fails after repair"
 
     return None, records

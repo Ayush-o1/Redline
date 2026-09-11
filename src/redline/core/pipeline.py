@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,7 +30,7 @@ from redline.models.api import ApiModel, Endpoint
 from redline.models.testcase import GenerationAttempt, TestCase
 from redline.openapi.loader import load_raw_spec
 from redline.openapi.normalize import normalize
-from redline.repair.loop import RepairAttempt, attempt_repair
+from redline.repair.loop import RepairAttempt, repair_until_valid_or_exhausted
 from redline.reporting.markdown import render_test_plan_markdown, write_test_plan_markdown
 from redline.reporting.report import EndpointRunResult, RunReport, write_json_report
 from redline.validation.validator import ValidationIssue, validate_test_cases
@@ -50,74 +51,29 @@ class EndpointOutcome:
     repair_attempts: list[RepairAttempt] = field(default_factory=list)
 
 
-def _repair_execution_failures(
-    endpoint: Endpoint,
-    api: ApiModel,
-    provider: LLMProvider,
-    max_retries: int,
-    failing_cases: dict[str, TestCase],
-    failing_messages: dict[str, str],
-    *,
-    output_dir: Path,
-    run_id: str,
-    target_base_url: str | None,
-    use_demo_app: bool,
-) -> tuple[dict[str, TestCase], list[RepairAttempt]]:
-    """Repair + re-execute each failing case individually, up to max_retries rounds."""
-    records: list[RepairAttempt] = []
-    fixed: dict[str, TestCase] = {}
-    logger = get_logger()
+def _make_execution_verifier(
+    *, output_dir: Path, run_id: str, target_base_url: str | None, use_demo_app: bool
+) -> Callable[[TestCase], tuple[bool, str | None]]:
+    """Build the `verify` callback repair_until_valid_or_exhausted uses when
+    repairing a case that failed execution (as opposed to one rejected by
+    validation): re-run the single repaired case for real and report whether
+    it now passes.
+    """
 
-    for test_id, original_case in failing_cases.items():
-        current_case = original_case
-        current_error = failing_messages[test_id]
+    def verify(case: TestCase) -> tuple[bool, str | None]:
+        exec_result = execute_test_cases(
+            [case],
+            output_dir=output_dir,
+            run_id=f"{run_id}-repair-{_slug(case.test_id)}",
+            target_base_url=target_base_url,
+            use_demo_app=use_demo_app,
+        )
+        outcome = exec_result.outcomes[0] if exec_result.outcomes else None
+        if outcome is not None and outcome.outcome == "passed":
+            return True, None
+        return False, (outcome.message if outcome else "execution failed")
 
-        for attempt_number in range(1, max_retries + 1):
-            step = attempt_repair(
-                endpoint,
-                current_case.model_dump(mode="json"),
-                current_error,
-                attempt_number,
-                provider,
-                api,
-            )
-            records.append(step.record)
-            logger.info(
-                "repair attempt %s/%s for %s: %s",
-                attempt_number,
-                max_retries,
-                test_id,
-                step.record.outcome,
-                extra={"phase": "repair"},
-            )
-
-            if step.candidate is None:
-                current_error = step.next_error or current_error
-                continue
-
-            current_case = step.candidate
-            if not step.accepted:
-                current_error = step.next_error or current_error
-                continue
-
-            exec_result = execute_test_cases(
-                [current_case],
-                output_dir=output_dir,
-                run_id=f"{run_id}-repair-{_slug(test_id)}-{attempt_number}",
-                target_base_url=target_base_url,
-                use_demo_app=use_demo_app,
-            )
-            outcome = next(
-                (o for o in exec_result.outcomes if o.test_id == current_case.test_id), None
-            )
-            if outcome is not None and outcome.outcome == "passed":
-                fixed[test_id] = current_case
-                break
-            current_error = (outcome.message if outcome and outcome.message else None) or (
-                "test still fails after repair"
-            )
-
-    return fixed, records
+    return verify
 
 
 def run_endpoint(
@@ -174,21 +130,12 @@ def run_endpoint(
         if original is None or settings.max_retries <= 0:
             still_rejected.append(issue)
             continue
-        current_case = original
-        current_error = issue.message
-        repaired: TestCase | None = None
-        for attempt_number in range(1, settings.max_retries + 1):
-            step = attempt_repair(
-                endpoint, current_case.model_dump(mode="json"), current_error, attempt_number,
-                provider, api,
-            )
-            outcome.repair_attempts.append(step.record)
-            if step.accepted and step.candidate is not None:
-                repaired = step.candidate
-                break
-            if step.candidate is not None:
-                current_case = step.candidate
-            current_error = step.next_error or current_error
+        # No `verify` callback here: passing deterministic validation is enough
+        # to accept the fix (execution happens afterwards, for every case).
+        repaired, records = repair_until_valid_or_exhausted(
+            endpoint, original, issue.message, settings.max_retries, provider, api
+        )
+        outcome.repair_attempts.extend(records)
         if repaired is not None:
             valid_cases.append(repaired)
         else:
@@ -223,30 +170,29 @@ def run_endpoint(
             o.test_id: (o.message or "test failed") for o in exec_result.outcomes
             if o.test_id in failing_kind
         }
-        failing_cases = {c.test_id: c for c in valid_cases if c.test_id in failing_kind}
-        fixed, records = _repair_execution_failures(
-            endpoint,
-            api,
-            provider,
-            settings.max_retries,
-            failing_cases,
-            failing_messages,
-            output_dir=output_dir,
-            run_id=run_id,
-            target_base_url=settings.target_base_url,
-            use_demo_app=use_demo_app,
+        cases_by_test_id = {c.test_id: c for c in valid_cases}
+        # This `verify` callback is what makes execution-repair stricter than
+        # validation-repair: a fix only counts once it actually passes when run.
+        verify = _make_execution_verifier(
+            output_dir=output_dir, run_id=run_id,
+            target_base_url=settings.target_base_url, use_demo_app=use_demo_app,
         )
-        outcome.repair_attempts.extend(records)
+
         for test_id, kind in failing_kind.items():
-            if test_id in fixed:
+            repaired, records = repair_until_valid_or_exhausted(
+                endpoint, cases_by_test_id[test_id], failing_messages[test_id],
+                settings.max_retries, provider, api, verify=verify,
+            )
+            outcome.repair_attempts.extend(records)
+            if repaired is not None:
+                cases_by_test_id[test_id] = repaired
                 result.passed += 1
                 if kind == "failed":
                     result.failed -= 1
                 else:
                     result.errors -= 1
-        for i, case in enumerate(valid_cases):
-            if case.test_id in fixed:
-                valid_cases[i] = fixed[case.test_id]
+
+        valid_cases = [cases_by_test_id[c.test_id] for c in valid_cases]
 
     outcome.valid_cases = valid_cases
     return outcome
